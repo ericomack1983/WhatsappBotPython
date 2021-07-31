@@ -1,0 +1,192 @@
+from flask import Flask
+from flask import jsonify, make_response, request
+from flask_cors import CORS, cross_origin
+app = Flask(__name__)
+cors = CORS(app, resources={r"/api/*": {"origins": "*"}})
+app.run(debug=True)
+app.config['CORS_HEADERS'] = 'Content-Type'
+#app.run(ssl_context=('/home/ec2-user/vtcpilot/keys/cert.pem', '/home/ec2-user/vtcpilot/keys/key.pem'))
+
+#Libraries
+import datetime
+import json
+import logging
+import requests
+import psycopg2
+import bcrypt
+import os
+DEBUG = False
+#VDP-CRED
+user_id_sbx = os.environ.get('user_id_sbx')
+password_sbx = os.environ.get('password_sbx')
+cert_sbx = '/home/ec2-user/vtcpilot/keys/cert.pem'
+key_sbx = '/home/ec2-user/vtcpilot/keys/pk.pem'
+user_id_prd = ''
+password_prd = ''
+cert_prd = ''
+key_prd = ''
+db_user = os.environ.get('db_user')
+db_pwd = os.environ.get('db_pwd')
+timeout = 10
+#SBX or PRD
+VDP_ENV='SBX'
+
+
+#Registration API
+@app.route('/vtc01/',methods=['POST'])
+@cross_origin()
+def Registration():
+    if request.is_json:
+                req = request.get_json()
+                last4 = req.get("primaryAccountNumber") 
+                json_skeleton= {
+                    "primaryAccountNumber": req.get("primaryAccountNumber")
+                }
+                #myobj = {"primaryAccountNumber": "467909494803XXXX"}
+                try:
+                    import http.client as http_client
+                except ImportError:
+                    # Python 2
+                    import httplib as http_client
+                http_client.HTTPSConnection.debuglevel = 0
+
+                # You must initialize logging, otherwise you'll not see debug output.
+                logging.basicConfig()
+                logging.getLogger().setLevel(logging.DEBUG)
+                requests_log = logging.getLogger("requests.packages.urllib3")
+                requests_log.setLevel(logging.DEBUG)
+                requests_log.propagate = True
+                
+                if VDP_ENV == 'SBX':
+                    url = 'https://sandbox.api.visa.com/vctc/customerrules/v1/consumertransactioncontrols'
+                    user_id = user_id_sbx
+                    password = password_sbx
+                    cert = cert_sbx
+                    key = key_sbx
+                else:
+                    url = 'https://api.visa.com/vctc/customerrules/v1/consumertransactioncontrols'
+                    user_id = user_id_prd
+                    password = password_prd
+                    cert = cert_prd
+                    key = key_prd
+
+                headers = {}
+                body = {}
+               
+                try:
+				                    response = requests.post(url,
+                                            cert = (cert, key),
+                                            auth = (user_id, password),
+                                            json = json_skeleton,
+                                            timeout = timeout
+                                            )
+                except Exception as e:
+                    return print(e)
+
+                #Parser JSON response from VDP
+                parsedJson = response.json()
+                jsondump = json.loads(response.text)
+                jsondump_output = json.dumps(jsondump)
+                #first Level JSON
+                resourceJson = parsedJson.get("resource")
+                #Second Level JSON
+                DocumentId = resourceJson.get("documentID")
+                
+                #DB Procedure to Inser Result
+                try:
+                    conn = psycopg2.connect("host=127.0.0.1 dbname=vtcdb user="+db_user+" password="+db_pwd)
+                    dbcursor = conn.cursor()
+                    dbcursor.execute("INSERT INTO registration (document_id, last4, json_dump) VALUES (%s, %s, %s)", (DocumentId, last4[-4:], jsondump_output))
+                    conn.commit()
+                except BaseException:
+                    return make_response(jsonify({"message": "ErrorDB:Registration"}))
+                    conn.close()
+                finally:
+                    conn.close()
+
+                #Return only DocumentID JSON
+                return make_response(jsonify(parsedJson))
+
+    else:
+                return make_response(jsonify({"message": "WS001 : Request body must be JSON.Please, check the Content-Type"}), 400)
+
+
+#CREATE/UPDATE CONTROLS
+@app.route('/vtc02/',methods=['POST'])
+def CreateUpdateControls():
+    if request.is_json:
+                req = request.get_json()
+                documentID = req.get("documentID")
+                if documentID == "":
+                    return make_response(jsonify({"message": "WS004 : Empty DocumentID"}), 200)
+                if not documentID: 
+                    return make_response(jsonify({"message": "WS004 : Empty DocumentID"}), 200)
+
+                #remove DocumentID from JSON 
+                if "documentID" in req:
+                    del req['documentID']
+
+                try:
+                    import http.client as http_client
+                except ImportError:
+                    # Python 2
+                    import httplib as http_client
+                http_client.HTTPSConnection.debuglevel = 0
+
+                # You must initialize logging, otherwise you'll not see debug output.
+                logging.basicConfig()
+                logging.getLogger().setLevel(logging.DEBUG)
+                requests_log = logging.getLogger("requests.packages.urllib3")
+                requests_log.setLevel(logging.DEBUG)
+                requests_log.propagate = True
+
+                if VDP_ENV == 'SBX':
+                    url = 'https://sandbox.api.visa.com/vctc/customerrules/v1/consumertransactioncontrols/'+documentID+'/rules'
+                    user_id = user_id_sbx
+                    password = password_sbx
+                    cert = cert_sbx
+                    key = key_sbx
+                else:
+                    url = 'https://api.visa.com/vctc/customerrules/v1/consumertransactioncontrols/'+documentID+'/rules'
+                    user_id = user_id_prd
+                    password = password_prd
+					                    cert = cert_prd
+                    key = key_prd
+
+                headers = {}
+                body = {}
+
+               # return make_response(req)
+                try:
+                    response = requests.post(url,
+                                            cert = (cert, key),
+                                            auth = (user_id, password),
+                                            json = req,
+                                            timeout = timeout
+                                            )
+                except Exception as e:
+                    return print(e)
+
+                #Parser JSON response from VDP
+                parsedJson = response.json()
+                #Parser JSON response from VDP
+                jsondump = json.loads(response.text)
+                jsondump_output = json.dumps(jsondump)
+
+                #DB Procedure to Inser Result
+                try:
+                    conn = psycopg2.connect("host=127.0.0.1 dbname=vtcdb user="+db_user+" password="+db_pwd)
+                    dbcursor = conn.cursor()
+                    dbcursor.execute("INSERT INTO controls (document_id, json_dump) VALUES (%s, %s)", (documentID, jsondump_output))
+                    conn.commit()
+                except BaseException:
+                    return make_response(jsonify({"message": "ErrorDB:Controls"}))
+                    conn.close()
+                finally:
+                    conn.close()
+
+                #Return all JSON
+                return make_response(jsonify(parsedJson))
+@app.route('/healthcheck/',methods=['GET'])
+def Healthcheck():
+        return make_response(jsonify({"message": "WS004 : Webservice is running up!"}), 200)
