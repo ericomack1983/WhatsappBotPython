@@ -1,0 +1,142 @@
+from selenium import webdriver
+import time
+import PySimpleGUI as sg   
+import time
+import datetime
+import calendar
+import sys
+import csv
+import logging
+import time
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.keys import Keys
+import win32api, win32con
+import keyboard
+
+
+
+log = "WhastappBot_WATCHDOG.log"
+logging.basicConfig(filename=log,level=logging.INFO,format='%(asctime)s %(message)s', datefmt='%d/%m/%Y %H:%M:%S')
+logging.info('<----------------> BEGGINING EXECUTION <---------------->')
+
+layout = [[sg.Text('Please, enter the question you would like to send to patients')],      
+                 [sg.Multiline(size=(65, 5))],
+                 [sg.Text('Choose the Weekday:')],
+                 [sg.InputCombo(('1-Monday', '2-Tuesday', '3-Wednesday', '4-Thursday', '5-Friday', '6-Saturday', '7-Sunday'), size=(20, 1))],
+                 [sg.Text('Note: You have 30 second to log in to Whatsapp Web, after typing your message')],
+                 [sg.Submit(), sg.Quit()]]      
+
+window = sg.Window('Zap Bot', layout)
+window_wait = False
+
+class WhatasappBot:
+    def __init__(self,text_input,combo_input):
+        # Group members according to weekday
+        self.mensagem = text_input
+        self.combo = combo_input
+        self.datFileExtension = ".dat"
+        self.filename = self.combo+self.datFileExtension
+        #groups
+        self.grupos = []
+        self.chat = []
+
+        #group_element
+        with open(self.filename , 'rt') as f:
+            self.csv_reader = csv.reader(f)
+            for line in self.csv_reader:
+                self.grupos.append(str(line).strip("]['\n"))
+
+        #chatbox_element
+        self.chat = []
+        with open('chatbox.txt' , 'rt') as c:
+            self.csv_reader_chat = csv.reader(c)
+            for line_chat in self.csv_reader_chat:
+               self.chat.append(str(line_chat).strip("]['\n"))
+
+        #Create Selenium Instance         
+        options = webdriver.ChromeOptions()
+        options.add_argument('lang=pt-br')
+        self.driver = webdriver.Chrome(executable_path=r'./chromedriver.exe')
+       
+    def EnviarMensagens(self):
+        #contact
+        #<span dir="auto" title="0012345" class="_3ko75 _5h6Y_ _3Whw5">0012345</span>
+        #ChatBox
+        #<div tabindex="-1" class="_3uMse"><div tabindex="-1" class="_2FVVk _2UL8j"><div class="_2FbwG" style="visibility: visible;">Type a message</div><div class="_3FRCZ copyable-text selectable-text" contenteditable="true" data-tab="1" dir="ltr" spellcheck="true"></div></div></div>
+        #sendButton
+        #<span data-icon="send" class=""><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"></path></svg></span></button></div>
+        
+        self.driver.get('https://web.whatsapp.com/') 
+        sg.Popup('Scan the QR code!')
+        #input("Scan the QR code!")
+        wait = WebDriverWait(self.driver, 600)   
+        time.sleep(30)
+        for grupo in self.grupos:
+            try:
+                self.driver.implicitly_wait(20)
+                # Search Contact on searching box    
+                x=179
+                y=300 # (-) Mouse Cursor goes UP (+) Mouse Cursor goes DOWN
+                win32api.SetCursorPos((x,y))
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,x,y,0,0)
+                win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP,x,y,0,0)
+                keyboard.write(grupo, delay=0.1)
+                x_arg = f'//span[contains(@title,\'{grupo}\')]'
+
+                #Find the Contact
+                try:
+                    time.sleep(5)
+                    #grupo_sending =  wait.until(EC.presence_of_element_located((By.XPATH, x_arg)))
+                    grupo_sending = self.driver.find_element_by_xpath(f"//span[@title='{grupo}']")
+                    grupo_sending.click()
+                    print("Searching Target....")
+                    logging.info("Searching Target....")
+                except Exception:
+                    print("Error to Find Contact: " + grupo)
+                    logging.info("Error to Find Contact: " + grupo) 
+
+                #Click on contact
+                try:
+                    chat_box  = self.driver.find_element_by_class_name(self.chat[0])
+                    chat_box.click()
+                    self.driver.implicitly_wait(3) 
+                    chat_box.send_keys(self.mensagem)
+                    time.sleep(5)
+                    print("ChatBox Successfully Selected. Message Content:" + self.mensagem)
+                    logging.info("ChatBox Successfully Selected. Message Content:" + self.mensagem)
+                except Exception:
+                    print("Error to send Message : " + self.mensagem)
+                    logging.info("Error to send Message: " + self.mensagem)  
+
+                #Submit the message
+                try:
+                    submit_message = self.driver.find_element_by_xpath("//span[@data-icon='send']")
+                    self.driver.implicitly_wait(3)
+                    submit_message.click()
+                    print("Successfully Send Message to : "+ grupo + '\n')
+                    logging.info("Successfully Send Message to : "+ grupo + '\n')
+                    time.sleep(5)
+                except Exception:
+                    print("Error to submit Message : " + self.mensagem)
+                    logging.info("Error to submit Message: " + self.mensagem) 
+            
+            except Exception:
+                print("Error on sending message to: " + grupo)
+                logging.info("Error on sending message to: " + grupo)
+                pass 
+
+        self.driver.close()
+        logging.info('<----------------> END EXECUTION <---------------->')
+        logging.info('')
+        logging.info('')
+
+event, values = window.read()
+text_input = str(values[0]).rstrip()
+combo_input = str(values[1]).rstrip()
+if event in ('Quit', sg.WIN_CLOSED):   
+     window.close()
+else:
+    bot = WhatasappBot(text_input,combo_input)
+    bot.EnviarMensagens()
